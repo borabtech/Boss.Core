@@ -1,0 +1,10 @@
+mode: ContinuousDeployment
+
+commit-message-incrementing: MergeMessageOnly
+
+major-version-bump-message: '(?i)(BREAKING[ -]CHANGE?:)|\+semver:\s?(breaking|major)'
+minor-version-bump-message: '(?i)(^(feat|feature)(\(.+\))?:)|\+semver:\s?(feature|minor)'
+patch-version-bump-message: '(?i)(^(fix|hotfix)(\(.+\))?:)|\+semver:\s?(fix|patch)'
+no-bump-message: '(?i)\+semver:\s?(none|skip)'
+# Major, Minor, Patch regex patterns
+# (?i) => case-insensitive

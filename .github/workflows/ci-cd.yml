@@ -1,0 +1,110 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - '**'        # trigger for all branches
+  pull_request:
+    branches: # Trigger on PR creations
+      - main
+      - develop
+
+jobs:
+  debug-event:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show event info
+        run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Ref: ${{ github.ref }}"
+          echo "Ref name: ${{ github.ref_name }}"
+          echo "SHA: ${{ github.sha }}"
+  # --------- Feature / other branches ---------
+  build-test:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history, GitVersion requires
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release
+
+      - name: Run unit tests
+        run: dotnet test --no-build --verbosity normal
+
+  # --------- Main branch merge ---------
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history, GitVersion requires
+          persist-credentials: false
+
+      # GitVersion setup
+      - name: Install GitVersion
+        uses: GitTools/actions/gitversion/setup@v0.9.14
+        with:
+          versionSpec: '6.4.0'
+
+      - name: Show last merge commit message
+        run: git log -1 --pretty=%B
+      
+      - name: Generate version
+        id: gitversion
+        uses: GitTools/actions/gitversion/execute@v0.9.14
+        with:
+          useConfigFile: true
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Pack
+        run: |
+          echo "GitVersion.FullSemVer=${{ steps.gitversion.outputs.FullSemVer }}"
+          echo "NuGetVersion: ${{ steps.gitversion.outputs.NuGetVersionV2 }}"
+          dotnet pack -c Release -p:PackageVersion=${{ steps.gitversion.outputs.FullSemVer }} -o ./artifacts
+
+      - name: List artifacts
+        run: ls -la ./artifacts
+
+      - name: Publish
+        run: dotnet nuget push ./artifacts/*.nupkg --source "github" --api-key ${{ secrets.GH_AUTH_TOKEN }}
+      
+      - name: Create Git tag
+        if: success()
+        env:
+          GH_PAT: ${{ secrets.GH_AUTH_TOKEN }}
+        run: |
+          TAG=${{ steps.gitversion.outputs.FullSemVer }}
+          
+          git config user.name "borabtech"
+          git config user.email "boraburgucugil@gmail.com"
+
+          git remote set-url origin https://$GH_PAT@github.com/${{ github.repository }}.git
+          git tag -a "v$TAG" -m "Release v$TAG"
+          git push origin "v$TAG"
